@@ -50,6 +50,9 @@ input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--g);outli
 @media (prefers-reduced-motion:no-preference){.toast{animation:in .2s}@keyframes in{from{opacity:0;transform:translate(-50%,-8px)}}}
 </style></head>
 <body><div id="app"></div>
+  <script src="cadete.js"></script>
+<script src="muni.js"></script>
+<script src="admin.js"></script>
 <script>
 // ====== CONFIGURACIÓN: reemplazá estas dos líneas con los datos de tu proyecto Supabase ======
 const SUPABASE_URL='https://wnivydpyoqqvkxufuudq.supabase.co', SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduaXZ5ZHB5b3Fxdmt4dWZ1dWRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNDYxMTQsImV4cCI6MjEwODYyMjExNH0.78HBLsvlJ9SXNxWuPsBSZtld3eQU5LGiL27ef1jzfeA';
@@ -95,8 +98,8 @@ async function load(){
   const {data,error}=await sb.from('perfiles').select('*').eq('id',user.id).single();
   if(error||!data){toast('No pudimos cargar tu perfil',1);return authView()}
   me=data;
-  me.rol==='CLIENTE'?clientShell():me.rol==='NEGOCIO'?negocioShell():otherRole();
-}
+  me.rol==='CLIENTE'?clientShell():me.rol==='NEGOCIO'?negocioShell():otherRole();//
+}const f={CLIENTE:clientShell,NEGOCIO:negocioShell,CADETE:window.cadeteShell,MUNI:window.muniShell,DUENO:window.duenoShell}[me.rol];f?f():otherRole();
 
 function otherRole(){
   app.innerHTML=`<div class="wrap auth"><h1>PEDI <b>GO</b></h1><p>Entraste como ${esc(me.rol)}. Esta pantalla se arma en los próximos pasos.</p><button class="btn sec" onclick="salir()">Cerrar sesión</button></div>`;
