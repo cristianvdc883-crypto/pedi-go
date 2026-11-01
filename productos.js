@@ -1,6 +1,18 @@
-/* ===== PANEL DEL COMERCIO: productos, ventas, mi local y alertas ===== */
-let npTab='pedidos',npProds=[],npBlob=null,nlBlob=null,npPend=0,npAudio=null,npWake=null,npTimer=null,npTicks=0,nvRango='hoy';
+/* ===== PANEL DEL COMERCIO: pedidos, productos, ventas, mi local y alertas ===== */
+(function(){const s=document.createElement('script');s.src='catalogo.js';document.head.appendChild(s)})();
+let npTab='pedidos',npProds=[],npBlob=null,nlBlob=null,npPend=0,npAudio=null,npWake=null,npTimer=null,npTicks=0,nvRango='hoy',npPeds=[],npCad={};
 const NP_TABS=['pedidos','productos','ventas','local'];
+const NP_ICONOS={
+  pedidos:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  productos:'<path d="M4 7l8-4 8 4v10l-8 4-8-4z"/><path d="M4 7l8 4 8-4M12 11v10"/>',
+  ventas:'<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
+  local:'<path d="M3 10l2-6h14l2 6z"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/>'
+};
+document.head.insertAdjacentHTML('beforeend','<style>.chip.am{background:#ffc83d22;color:#ffc83d}.btn.no{background:none;border:1px solid var(--red);color:var(--red)}'
+  +'.bnav{position:fixed;left:0;right:0;bottom:0;z-index:7;background:#000f;backdrop-filter:blur(8px);border-top:1px solid var(--line);display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}'
+  +'.bnav button{flex:1;background:none;border:0;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;padding:6px 0;position:relative}'
+  +'.bnav button.on{color:var(--g)}.bnav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}'
+  +'.bnav i{position:absolute;top:0;left:calc(50% + 6px);min-width:18px;height:18px;border-radius:9px;background:var(--red);color:#fff;font-style:normal;font-size:11px;line-height:18px;text-align:center;padding:0 5px}</style>');
 
 document.addEventListener('DOMContentLoaded',()=>{
   const _ns=negocioShell;
@@ -8,20 +20,15 @@ document.addEventListener('DOMContentLoaded',()=>{
     npTab='pedidos';
     await _ns();
     const n=document.getElementById('nmain');if(!n||!miNeg)return;
-    n.insertAdjacentHTML('beforebegin','<div class="wrap" style="padding-top:14px"><div id="npsnd"></div><div class="tabs" style="margin:0">'
-      +'<button id="np1" class="on" onclick="npSet(\'pedidos\')">Pedidos</button>'
-      +'<button id="np2" onclick="npSet(\'productos\')">Productos</button>'
-      +'<button id="np3" onclick="npSet(\'ventas\')">Ventas</button>'
-      +'<button id="np4" onclick="npSet(\'local\')">Mi local</button></div></div>');
-    document.querySelectorAll('#np1,#np2,#np3,#np4').forEach(b=>{b.style.fontSize='13px';b.style.padding='10px 2px'});
+    n.insertAdjacentHTML('beforebegin','<div class="wrap" style="padding-top:14px"><div id="npsnd"></div></div>');
+    app.insertAdjacentHTML('beforeend','<nav class="bnav">'+NP_TABS.map((t,i)=>'<button id="np'+(i+1)+'" class="'+(i?'':'on')+'" onclick="npSet(\''+t+'\')"><svg viewBox="0 0 24 24">'+NP_ICONOS[t]+'</svg><span>'+['Pedidos','Productos','Ventas','Mi local'][i]+'</span>'+(i?'':'<i id="npbadge" style="display:none"></i>')+'</button>').join('')+'</nav>');
     npSonidoUI();npPantalla();npPend=0;npContar();
     clearInterval(npTimer);npTicks=0;npTimer=setInterval(npTick,4000);
   };
-  const _rn=renderNegPedidos;
   renderNegPedidos=async function(){
     npContar();
     if(npTab!=='pedidos')return;
-    return _rn();
+    return npRenderPedidos();
   };
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='visible'&&document.getElementById('nmain'))npPantalla();
@@ -34,6 +41,7 @@ function npTick(){
   npTicks++;
   if(npPend>0&&npAudio)npBeep();
   if(npTicks%4===0)npContar();
+  if(npTab==='pedidos'&&npTicks%7===0)npPintarPedidos();
 }
 function npBeep(){
   if(!npAudio)return;
@@ -73,178 +81,108 @@ async function npContar(){
   if(!miNeg)return;
   const {count}=await sb.from('pedidos').select('id',{count:'exact',head:true}).eq('negocio_id',miNeg.id).eq('estado','pendiente');
   const antes=npPend;npPend=count||0;
-  const b=document.getElementById('np1');if(b)b.textContent=npPend?'Pedidos ('+npPend+')':'Pedidos';
+  const b=document.getElementById('npbadge');if(b){b.textContent=npPend;b.style.display=npPend?'block':'none'}
   if(npPend>antes&&npAudio)npBeep();
 }
 
 function npSet(t){
   npTab=t;
   NP_TABS.forEach((x,i)=>{const b=document.getElementById('np'+(i+1));if(b)b.className=x===t?'on':''});
+  window.scrollTo(0,0);
   if(t==='pedidos')renderNegPedidos();
   if(t==='productos')renderProductos();
   if(t==='ventas')renderVentas();
   if(t==='local')renderLocal();
 }
 
-/* --- Productos --- */
-async function renderProductos(){
+/* --- Pedidos --- */
+const npMin=t=>Math.floor((Date.now()-new Date(t))/60000);
+function npTiempo(p){
+  if(p.estado==='pendiente'){const m=npMin(p.created_at);return[m>=6?'no':m>=3?'am':'ok',m<1?'Recién llegó':'Hace '+m+' min']}
+  if(['aceptado','preparando'].includes(p.estado)&&p.tiempo_prep_min&&p.aceptado_at){
+    const r=p.tiempo_prep_min-npMin(p.aceptado_at);
+    return r>=0?['ok','Faltan '+r+' min']:['no','Atrasado '+(-r)+' min'];
+  }
+  if(['entregado','rechazado','cancelado'].includes(p.estado))return['',new Date(p.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})];
+  return['','Hace '+npMin(p.created_at)+' min'];
+}
+function npAcciones(p){
+  const b=(t,f,c)=>`<button class="btn ${c||''}" style="flex:1;margin-top:10px" onclick="${f}">${t}</button>`;
+  if(p.estado==='pendiente')return b('Aceptar',`npAceptar('${p.id}')`)+b('Rechazar',`npRechazar('${p.id}')`,'no');
+  if(p.estado==='aceptado')return b('Empezar a preparar',`setEstado('${p.id}','preparando')`)+b('Listo para retirar',`setEstado('${p.id}','listo')`,'sec');
+  if(p.estado==='preparando')return b('Listo para retirar',`setEstado('${p.id}','listo')`);
+  return '';
+}
+function npCard(p){
+  const [cls,txt]=npTiempo(p),cad=npCad[p.id];
+  const fin=['rechazado','cancelado'].includes(p.estado);
+  const retira=cad
+    ?`<div style="margin-top:8px;padding:10px;border-radius:12px;background:#00ff8814;border:1px solid #00ff8844"><div class="meta" style="margin:0">Retira el pedido</div><b>${esc(cad.nombre)}</b>${cad.telefono?` · <a style="color:var(--g)" href="tel:${esc(cad.telefono)}">${esc(cad.telefono)}</a>`:''}</div>`
+    :(p.estado==='listo'?'<div class="meta" style="margin-top:8px">Esperando que un cadete lo tome</div>':'');
+  return `<div class="card" style="padding:14px;${p.estado==='pendiente'?'border-color:var(--g)':''}">
+  <div class="row" style="align-items:center"><div style="font-size:24px;font-weight:800;letter-spacing:-.5px">#${p.numero}</div><span class="chip ${cls}">${txt}</span></div>
+  <div class="row" style="align-items:center"><span class="chip ${p.estado==='entregado'?'ok':fin?'no':''}">${ESTADOS[p.estado]}</span><b>${money(p.total)}</b></div>
+  <div class="meta">${esc(p.cliente_nombre)}${p.cliente_telefono?` · <a style="color:var(--g)" href="tel:${esc(p.cliente_telefono)}">${esc(p.cliente_telefono)}</a>`:''}</div>
+  <div class="meta">Entrega: ${esc(p.direccion_entrega)}</div>
+  <div style="margin:8px 0">${p.items.map(i=>`${i.cantidad} × ${esc(i.nombre)}`).join('<br>')}</div>
+  ${p.nota?`<div class="meta">Nota: ${esc(p.nota)}</div>`:''}
+  ${p.motivo_rechazo?`<div class="meta" style="color:var(--red)">Motivo: ${esc(p.motivo_rechazo)}</div>`:''}
+  ${retira}<div style="display:flex;gap:8px">${npAcciones(p)}</div></div>`;
+}
+function npSec(t,l,vacio){
+  return `<h3 style="margin:18px 0 8px">${t} (${l.length})</h3>${l.length?l.map(npCard).join(''):vacio?`<div class="empty" style="padding:16px 0">${vacio}</div>`:''}`;
+}
+async function npRenderPedidos(){
   const m=document.getElementById('nmain');if(!m)return;
-  m.innerHTML='<div class="empty">Cargando…</div>';
-  const {data,error}=await sb.from('productos').select('*').eq('negocio_id',miNeg.id).order('nombre');
-  if(error)return m.innerHTML='<div class="empty">No pudimos cargar los productos.</div>';
-  npProds=data;
-  m.innerHTML=`<button class="btn" onclick="npForm()">+ Agregar producto</button><div style="height:14px"></div>`
-  +(data.map(p=>`<div class="card ${p.disponible?'':'closed'}"><div class="prod">
-    <img src="${esc(p.foto_url||miNeg.foto_url||'')}" alt="">
-    <div class="t"><div>${esc(p.nombre)}</div><div class="meta">${esc(p.descripcion||'')}</div><div class="p">${money(p.precio)}</div></div>
-    <span class="chip ${p.disponible?'ok':'no'}">${p.disponible?'Disponible':'Agotado'}</span></div>
-    <div style="display:flex;gap:8px;padding:0 12px 12px">
-    <button class="btn sec" style="flex:1;padding:10px" onclick="npForm('${p.id}')">Editar</button>
-    <button class="btn sec" style="flex:1;padding:10px" onclick="npDisp('${p.id}')">${p.disponible?'Marcar agotado':'Volver a poner'}</button></div></div>`).join('')
-  ||'<div class="empty">Todavía no cargaste productos. Tocá "Agregar producto".</div>');
+  const [r,c]=await Promise.all([
+    sb.from('pedidos').select('*').eq('negocio_id',miNeg.id).order('created_at',{ascending:false}).limit(100),
+    sb.rpc('cadetes_de_mi_negocio')]);
+  if(r.error)return m.innerHTML='<div class="empty">No pudimos cargar los pedidos.</div>';
+  npPeds=r.data;npCad={};
+  (c.data||[]).forEach(x=>{npCad[x.pedido_id]=x});
+  npPintarPedidos();
 }
-async function npDisp(id){
-  const p=npProds.find(x=>x.id===id);
-  const {error}=await sb.from('productos').update({disponible:!p.disponible}).eq('id',id);
-  error?toast(error.message,1):renderProductos();
-}
-function npResize(file,max){
-  return new Promise((ok,no)=>{
-    const img=new Image(),u=URL.createObjectURL(file);
-    img.onload=()=>{
-      const k=Math.min(1,max/Math.max(img.width,img.height));
-      const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
-      c.getContext('2d').drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(u);
-      c.toBlob(b=>b?ok(b):no(new Error('No pudimos procesar la foto')),'image/jpeg',0.82);
-    };
-    img.onerror=()=>no(new Error('No pudimos leer la foto'));
-    img.src=u;
-  });
-}
-function npForm(id){
-  npBlob=null;
-  const p=id?npProds.find(x=>x.id===id):{nombre:'',descripcion:'',precio:'',foto_url:''};
-  const s=document.createElement('div');s.className='sheet';s.id='sheet';
-  s.innerHTML=`<div><h3 style="margin-bottom:12px">${id?'Editar producto':'Nuevo producto'}</h3>
-  <img id="npprev" src="${esc(p.foto_url||'')}" alt="" style="width:100%;height:160px;object-fit:cover;border-radius:12px;margin-bottom:10px;background:#1d1d1d;${p.foto_url?'':'display:none'}">
-  <input type="file" id="npfoto" accept="image/*" style="display:none">
-  <button class="btn sec" style="margin-bottom:12px" onclick="document.getElementById('npfoto').click()">${p.foto_url?'Cambiar foto':'Elegir foto'}</button>
-  <div class="meta">Nombre</div><input id="npn" value="${esc(p.nombre)}" placeholder="Ej: Milanesa napolitana">
-  <div class="meta">Descripción (opcional)</div><input id="npd" value="${esc(p.descripcion||'')}" placeholder="Ej: Con papas fritas">
-  <div class="meta">Precio en pesos</div><input id="npp" type="number" inputmode="numeric" value="${p.precio}" placeholder="Ej: 9500">
-  <button class="btn" id="npgo">Guardar</button>
-  ${id?'<button class="btn red" id="npdel">Eliminar producto</button>':''}
-  <button class="btn sec" style="margin-top:8px" onclick="document.getElementById('sheet').remove()">Cancelar</button></div>`;
-  document.body.appendChild(s);
-  document.getElementById('npfoto').onchange=async e=>{
-    const f=e.target.files[0];if(!f)return;
-    try{
-      npBlob=await npResize(f,800);
-      const pv=document.getElementById('npprev');pv.src=URL.createObjectURL(npBlob);pv.style.display='block';
-    }catch(err){toast(err.message,1)}
-  };
-  document.getElementById('npgo').onclick=async e=>{
-    const v=i=>document.getElementById(i).value.trim();
-    const nombre=v('npn'),precio=Number(v('npp'));
-    if(!nombre)return toast('Falta el nombre',1);
-    if(v('npp')===''||!(precio>=0))return toast('Poné un precio válido',1);
-    e.target.disabled=true;
-    let foto=p.foto_url||null;
-    if(npBlob){
-      const ruta=miNeg.id+'/'+Date.now()+'.jpg';
-      const up=await sb.storage.from('productos').upload(ruta,npBlob,{contentType:'image/jpeg'});
-      if(up.error){e.target.disabled=false;return toast('No pudimos subir la foto: '+up.error.message,1)}
-      foto=sb.storage.from('productos').getPublicUrl(ruta).data.publicUrl;
-    }
-    const datos={nombre,descripcion:v('npd')||null,precio,foto_url:foto};
-    const r=id?await sb.from('productos').update(datos).eq('id',id)
-              :await sb.from('productos').insert({...datos,negocio_id:miNeg.id});
-    if(r.error){e.target.disabled=false;return toast(r.error.message,1)}
-    s.remove();toast(id?'Producto actualizado':'Producto agregado');renderProductos();
-  };
-  if(id)document.getElementById('npdel').onclick=async()=>{
-    if(!confirm('¿Eliminar "'+p.nombre+'"? No se puede deshacer.'))return;
-    const {error}=await sb.from('productos').delete().eq('id',id);
-    if(error)return toast(error.message,1);
-    s.remove();toast('Producto eliminado');renderProductos();
-  };
-}
-
-/* --- Mi local: portada y datos del comercio --- */
-function renderLocal(){
-  const m=document.getElementById('nmain');if(!m)return;
-  nlBlob=null;
-  m.innerHTML=`<div class="card" style="padding:14px"><h3 style="margin-bottom:10px">${esc(miNeg.nombre)}</h3>
-  <img id="nlprev" src="${esc(miNeg.foto_url||'')}" alt="" style="width:100%;height:150px;object-fit:cover;border-radius:12px;margin-bottom:10px;background:#1d1d1d;${miNeg.foto_url?'':'display:none'}">
-  <input type="file" id="nlfoto" accept="image/*" style="display:none">
-  <button class="btn sec" style="margin-bottom:12px" onclick="document.getElementById('nlfoto').click()">${miNeg.foto_url?'Cambiar foto de portada':'Elegir foto de portada'}</button>
-  <div class="meta">Descripción</div><input id="nld" value="${esc(miNeg.descripcion||'')}" placeholder="Ej: Las mejores milanesas del barrio">
-  <div class="meta">Teléfono</div><input id="nlt" type="tel" value="${esc(miNeg.telefono||'')}">
-  <div class="meta">Costo de envío (pesos)</div><input id="nle" type="number" inputmode="numeric" value="${miNeg.costo_envio}">
-  <div class="meta">Tiempo estimado de entrega (minutos)</div><input id="nlm" type="number" inputmode="numeric" value="${miNeg.tiempo_estimado_min}">
-  <button class="btn" id="nlgo">Guardar cambios</button>
-  <div class="meta" style="margin-top:10px">El nombre y la dirección del local los cambia el administrador.</div></div>`;
-  document.getElementById('nlfoto').onchange=async e=>{
-    const f=e.target.files[0];if(!f)return;
-    try{
-      nlBlob=await npResize(f,1000);
-      const pv=document.getElementById('nlprev');pv.src=URL.createObjectURL(nlBlob);pv.style.display='block';
-    }catch(err){toast(err.message,1)}
-  };
-  document.getElementById('nlgo').onclick=async e=>{
-    const v=i=>document.getElementById(i).value.trim();
-    const envio=Number(v('nle')),min=parseInt(v('nlm'));
-    if(v('nle')===''||!(envio>=0))return toast('Poné un costo de envío válido (puede ser 0)',1);
-    if(!(min>=1))return toast('Poné el tiempo estimado en minutos',1);
-    e.target.disabled=true;
-    let foto=miNeg.foto_url||null;
-    if(nlBlob){
-      const ruta=miNeg.id+'/portada-'+Date.now()+'.jpg';
-      const up=await sb.storage.from('productos').upload(ruta,nlBlob,{contentType:'image/jpeg'});
-      if(up.error){e.target.disabled=false;return toast('No pudimos subir la foto: '+up.error.message,1)}
-      foto=sb.storage.from('productos').getPublicUrl(ruta).data.publicUrl;
-    }
-    const {data,error}=await sb.from('negocios').update({descripcion:v('nld')||null,telefono:v('nlt')||null,costo_envio:envio,tiempo_estimado_min:min,foto_url:foto}).eq('id',miNeg.id).select().single();
-    e.target.disabled=false;
-    if(error)return toast(error.message,1);
-    miNeg=data;toast('Datos del local guardados');renderLocal();
-  };
-}
-
-/* --- Ventas --- */
-function nvSet(r){nvRango=r;renderVentas()}
-async function renderVentas(){
-  const m=document.getElementById('nmain');if(!m)return;
-  m.innerHTML='<div class="empty">Cargando…</div>';
-  const dias=nvRango==='hoy'?1:nvRango==='7'?7:30;
-  const desde=new Date();desde.setHours(0,0,0,0);desde.setDate(desde.getDate()-(dias-1));
-  const {data,error}=await sb.from('pedidos').select('estado,subtotal,items,created_at').eq('negocio_id',miNeg.id).gte('created_at',desde.toISOString()).order('created_at',{ascending:false}).limit(1000);
-  if(error)return m.innerHTML='<div class="empty">No pudimos cargar las ventas.</div>';
-  const ent=data.filter(p=>p.estado==='entregado');
-  const vend=ent.reduce((s,p)=>s+Number(p.subtotal),0);
-  const ticket=ent.length?vend/ent.length:0;
-  const perdidos=data.filter(p=>['rechazado','cancelado'].includes(p.estado)).length;
-  const acum={};
-  ent.forEach(p=>p.items.forEach(i=>{
-    const a=acum[i.nombre]||(acum[i.nombre]={c:0,t:0});
-    a.c+=Number(i.cantidad);a.t+=Number(i.precio)*Number(i.cantidad);
-  }));
-  const mas=Object.entries(acum).sort((a,b)=>b[1].c-a[1].c).slice(0,5);
-  const porDia=[];
-  for(let i=0;i<dias;i++){const d=new Date(desde);d.setDate(d.getDate()+i);porDia.push({d,t:0})}
-  ent.forEach(p=>{
-    const d=new Date(p.created_at);d.setHours(0,0,0,0);
-    const x=porDia.find(y=>y.d.getTime()===d.getTime());if(x)x.t+=Number(p.subtotal);
-  });
-  const max=Math.max(1,...porDia.map(x=>x.t));
+function npPintarPedidos(){
+  const m=document.getElementById('nmain');if(!m||npTab!=='pedidos')return;
+  const g=(...e)=>npPeds.filter(p=>e.includes(p.estado));
+  const h=new Date();h.setHours(0,0,0,0);
+  const hoy=npPeds.filter(p=>new Date(p.created_at)>=h);
+  const vend=hoy.filter(p=>p.estado==='entregado').reduce((s,p)=>s+Number(p.subtotal),0);
   const k=(v,t)=>`<div style="flex:1"><div style="font-size:20px;font-weight:800;color:var(--g)">${v}</div><div class="meta">${t}</div></div>`;
-  const btn=(r,t)=>`<button class="${nvRango===r?'on':''}" onclick="nvSet('${r}')">${t}</button>`;
-  m.innerHTML=`<div class="tabs" style="margin:0 0 12px">${btn('hoy','Hoy')}${btn('7','7 días')}${btn('30','30 días')}</div>
-  <div class="card" style="padding:14px"><div style="display:flex;gap:8px;text-align:center">${k(money(vend),'Vendido (sin envío)')}${k(ent.length,ent.length===1?'Pedido entregado':'Pedidos entregados')}${k(money(Math.round(ticket)),'Ticket promedio')}</div>
-  <div class="meta" style="text-align:center;margin-top:10px">Rechazados o cancelados: ${perdidos}</div></div>
-  ${dias>1?`<div class="card" style="padding:14px"><div class="meta" style="margin:0 0 8px">Ventas por día</div>
-  <div style="display:flex;align-items:flex-end;gap:3px;height:100px">${porDia.map(x=>`<div style="flex:1;height:100%;display:flex;align-items:flex-end"><div style="width:100%;background:var(--g);border-radius:4px 4px 0 0;height:${Math.round(x.t/max*100)}%;min-height:${x.t?3:0}px"></div></div>`).join('')}</div>
-  ${dias===7?`<div style="display:flex;gap:3px">${porDia.map(x=>`<div class="meta" style="flex:1;text-align:center;font-size:11px">${x.d.toLocaleDateString('es-AR',{weekday:'short'}).slice(0,2)}</div>`).join('')}</div>`:''}</div>`:''}
-  <div class="card" style="padding:14px"><h3 style="margin-bottom:8px">Lo más pedido</h3>
-  ${mas.map((x,i)=>`<div class="row"><span>${i+1}. ${esc(x[0])}</span><span><b>${x[1].c}</b> <span class="meta">· ${money(x[1].t)}</span></span></div>`).join('')||'<div class="meta">Todavía no hay ventas en este período.</div>'}</div>`;
-                       }
+  m.innerHTML=`<div class="card" style="padding:14px"><div class="row" style="align-items:center"><div><h3>${esc(miNeg.nombre)}</h3><div class="meta">${miNeg.abierto?'Recibiendo pedidos':'Cerrado: no recibís pedidos'}</div></div>
+  <button class="btn" style="width:auto;padding:10px 16px;${miNeg.abierto?'background:none;color:var(--red);border:1px solid var(--red)':''}" onclick="toggleAbierto()">${miNeg.abierto?'Cerrar local':'Abrir local'}</button></div>
+  <div style="display:flex;gap:8px;text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">${k(hoy.length,'Pedidos hoy')}${k(money(vend),'Vendido hoy')}${k(g('pendiente').length,'Por atender')}</div></div>
+  ${npSec('Nuevos',g('pendiente'),'Sin pedidos nuevos')}${npSec('En curso',g('aceptado','preparando','listo','en_camino'))}${npSec('Finalizados',g('entregado','rechazado','cancelado').slice(0,10))}`;
+}
+function npAbrirSheet(html){
+  const s=document.createElement('div');s.className='sheet';s.id='sheet';
+  s.innerHTML='<div>'+html+'<button class="btn sec" style="margin-top:12px" onclick="document.getElementById(\'sheet\').remove()">Cancelar</button></div>';
+  document.body.appendChild(s);
+}
+function npAceptar(id){
+  npAbrirSheet(`<h3 style="margin-bottom:4px">¿Cuánto tarda en estar listo?</h3><div class="meta" style="margin-bottom:14px">El cliente va a ver este tiempo en su pedido.</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">${[10,15,20,30,45,60].map(m=>`<button class="btn sec" onclick="npConfirmarAceptar('${id}',${m})">${m} min</button>`).join('')}</div>`);
+}
+async function npConfirmarAceptar(id,m){
+  const {error}=await sb.rpc('negocio_aceptar',{p_id:id,p_min:m});
+  const s=document.getElementById('sheet');if(s)s.remove();
+  if(error)return toast(error.message,1);
+  toast('Pedido aceptado');renderNegPedidos();
+}
+function npRechazar(id){
+  npAbrirSheet(`<h3 style="margin-bottom:4px">¿Por qué lo rechazás?</h3><div class="meta" style="margin-bottom:14px">El cliente va a ver el motivo.</div>
+  ${['Sin stock','Local cerrado por hoy','Demasiados pedidos','Dirección fuera de zona'].map(t=>`<button class="btn sec" style="margin-bottom:8px" onclick="npConfirmarRechazo('${id}',this.textContent)">${t}</button>`).join('')}
+  <input id="npotro" placeholder="Otro motivo" style="margin-top:6px">
+  <button class="btn no" id="npotrob">Rechazar con este motivo</button>`);
+  document.getElementById('npotrob').onclick=()=>{
+    const t=document.getElementById('npotro').value.trim();
+    if(!t)return toast('Escribí el motivo',1);
+    npConfirmarRechazo(id,t);
+  };
+}
+async function npConfirmarRechazo(id,t){
+  const {error}=await sb.rpc('negocio_rechazar',{p_id:id,p_motivo:t});
+  const s=document.getElementById('sheet');if(s)s.remove();
+  if(error)return toast(error.message,1);
+  toast('Pedido rechazado');renderNegPedidos();
+                                                                                                                                                          }
