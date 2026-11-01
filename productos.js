@@ -1,6 +1,6 @@
 /* ===== PANEL DEL COMERCIO: pedidos, productos, ventas, mi local y alertas ===== */
 (function(){const s=document.createElement('script');s.src='catalogo.js';document.head.appendChild(s)})();
-let npTab='pedidos',npProds=[],npBlob=null,nlBlob=null,npPend=0,npAudio=null,npWake=null,npTimer=null,npTicks=0,nvRango='hoy',npPeds=[],npCad={};
+let npTab='pedidos',npProds=[],npBlob=null,nlBlob=null,npPend=0,npAudio=null,npWake=null,npTimer=null,npTicks=0,nvRango='hoy',npPeds=[],npCad={},npRelojT=null;
 const NP_TABS=['pedidos','productos','ventas','local'];
 const NP_ICONOS={
   pedidos:'<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     app.insertAdjacentHTML('beforeend','<nav class="bnav">'+NP_TABS.map((t,i)=>'<button id="np'+(i+1)+'" class="'+(i?'':'on')+'" onclick="npSet(\''+t+'\')"><svg viewBox="0 0 24 24">'+NP_ICONOS[t]+'</svg><span>'+['Pedidos','Productos','Ventas','Mi local'][i]+'</span>'+(i?'':'<i id="npbadge" style="display:none"></i>')+'</button>').join('')+'</nav>');
     npSonidoUI();npPantalla();npPend=0;npContar();
     clearInterval(npTimer);npTicks=0;npTimer=setInterval(npTick,4000);
+    clearInterval(npRelojT);npRelojT=setInterval(npReloj,1000);
   };
   renderNegPedidos=async function(){
     npContar();
@@ -96,15 +97,28 @@ function npSet(t){
 }
 
 /* --- Pedidos --- */
-const npMin=t=>Math.floor((Date.now()-new Date(t))/60000);
+const npFmt=ms=>{const s=Math.max(0,Math.floor(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 function npTiempo(p){
-  if(p.estado==='pendiente'){const m=npMin(p.created_at);return[m>=6?'no':m>=3?'am':'ok',m<1?'Recién llegó':'Hace '+m+' min']}
+  const ini=new Date(p.created_at).getTime(),d=Date.now()-ini;
+  if(p.estado==='pendiente')return[d>=360000?'no':d>=180000?'am':'ok','Hace '+npFmt(d),'data-ini="'+ini+'" data-pend="1"'];
   if(['aceptado','preparando'].includes(p.estado)&&p.tiempo_prep_min&&p.aceptado_at){
-    const r=p.tiempo_prep_min-npMin(p.aceptado_at);
-    return r>=0?['ok','Faltan '+r+' min']:['no','Atrasado '+(-r)+' min'];
+    const fin=new Date(p.aceptado_at).getTime()+p.tiempo_prep_min*60000,r=fin-Date.now();
+    return[r>=0?'ok':'no',(r>=0?'Faltan ':'Atrasado ')+npFmt(Math.abs(r)),'data-fin="'+fin+'"'];
   }
   if(['entregado','rechazado','cancelado'].includes(p.estado))return['',new Date(p.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})];
-  return['','Hace '+npMin(p.created_at)+' min'];
+  return['','Hace '+npFmt(d),'data-ini="'+ini+'"'];
+}
+function npReloj(){
+  if(!document.getElementById('nmain')){clearInterval(npRelojT);return}
+  const ahora=Date.now();
+  document.querySelectorAll('.npcr').forEach(e=>{
+    const fin=e.getAttribute('data-fin'),ini=e.getAttribute('data-ini');
+    if(fin){const r=Number(fin)-ahora;e.textContent=(r>=0?'Faltan ':'Atrasado ')+npFmt(Math.abs(r));e.className='chip npcr '+(r>=0?'ok':'no')}
+    else if(ini){
+      const d=ahora-Number(ini);e.textContent='Hace '+npFmt(d);
+      if(e.getAttribute('data-pend'))e.className='chip npcr '+(d>=360000?'no':d>=180000?'am':'ok');
+    }
+  });
 }
 function npAcciones(p){
   const b=(t,f,c)=>`<button class="btn ${c||''}" style="flex:1;margin-top:10px" onclick="${f}">${t}</button>`;
@@ -114,13 +128,13 @@ function npAcciones(p){
   return '';
 }
 function npCard(p){
-  const [cls,txt]=npTiempo(p),cad=npCad[p.id];
+  const [cls,txt,at]=npTiempo(p),cad=npCad[p.id];
   const fin=['rechazado','cancelado'].includes(p.estado);
   const retira=cad
     ?`<div style="margin-top:8px;padding:10px;border-radius:12px;background:#00ff8814;border:1px solid #00ff8844"><div class="meta" style="margin:0">Retira el pedido</div><b>${esc(cad.nombre)}</b>${cad.telefono?` · <a style="color:var(--g)" href="tel:${esc(cad.telefono)}">${esc(cad.telefono)}</a>`:''}</div>`
     :(p.estado==='listo'?'<div class="meta" style="margin-top:8px">Esperando que un cadete lo tome</div>':'');
   return `<div class="card" style="padding:14px;${p.estado==='pendiente'?'border-color:var(--g)':''}">
-  <div class="row" style="align-items:center"><div style="font-size:24px;font-weight:800;letter-spacing:-.5px">#${p.numero}</div><span class="chip ${cls}">${txt}</span></div>
+  <div class="row" style="align-items:center"><div style="font-size:24px;font-weight:800;letter-spacing:-.5px">#${p.numero}</div><span class="chip npcr ${cls}" ${at||''}>${txt}</span></div>
   <div class="row" style="align-items:center"><span class="chip ${p.estado==='entregado'?'ok':fin?'no':''}">${ESTADOS[p.estado]}</span><b>${money(p.total)}</b></div>
   <div class="meta">${esc(p.cliente_nombre)}${p.cliente_telefono?` · <a style="color:var(--g)" href="tel:${esc(p.cliente_telefono)}">${esc(p.cliente_telefono)}</a>`:''}</div>
   <div class="meta">Entrega: ${esc(p.direccion_entrega)}</div>
@@ -185,4 +199,4 @@ async function npConfirmarRechazo(id,t){
   const s=document.getElementById('sheet');if(s)s.remove();
   if(error)return toast(error.message,1);
   toast('Pedido rechazado');renderNegPedidos();
-                                                                                                                                                          }
+     }
