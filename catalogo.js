@@ -122,6 +122,7 @@ function renderLocal(){
     if(error)return toast(error.message,1);
     miNeg=data;toast('Datos del local guardados');renderLocal();
   };
+  if(window.npHorario)npHorario(m);
 }
 
 /* --- Ventas --- */
@@ -160,4 +161,4 @@ async function renderVentas(){
   ${dias===7?`<div style="display:flex;gap:3px">${porDia.map(x=>`<div class="meta" style="flex:1;text-align:center;font-size:11px">${x.d.toLocaleDateString('es-AR',{weekday:'short'}).slice(0,2)}</div>`).join('')}</div>`:''}</div>`:''}
   <div class="card" style="padding:14px"><h3 style="margin-bottom:8px">Lo más pedido</h3>
   ${mas.map((x,i)=>`<div class="row"><span>${i+1}. ${esc(x[0])}</span><span><b>${x[1].c}</b> <span class="meta">· ${money(x[1].t)}</span></span></div>`).join('')||'<div class="meta">Todavía no hay ventas en este período.</div>'}</div>`;
-  }
+        }
