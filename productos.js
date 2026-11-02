@@ -1,5 +1,5 @@
 /* ===== PANEL DEL COMERCIO: pedidos, productos, ventas, mi local y alertas ===== */
-(function(){const s=document.createElement('script');s.src='catalogo.js';document.head.appendChild(s)})();
+['catalogo.js','extras.js'].forEach(f=>{const s=document.createElement('script');s.src=f;document.head.appendChild(s)});
 let npTab='pedidos',npProds=[],npBlob=null,nlBlob=null,npPend=0,npAudio=null,npWake=null,npTimer=null,npTicks=0,nvRango='hoy',npPeds=[],npCad={},npRelojT=null;
 const NP_TABS=['pedidos','productos','ventas','local'];
 const NP_ICONOS={
@@ -80,10 +80,15 @@ async function npPantalla(){
 }
 async function npContar(){
   if(!miNeg)return;
-  const {count}=await sb.from('pedidos').select('id',{count:'exact',head:true}).eq('negocio_id',miNeg.id).eq('estado','pendiente');
-  const antes=npPend;npPend=count||0;
-  const b=document.getElementById('npbadge');if(b){b.textContent=npPend;b.style.display=npPend?'block':'none'}
+  const [r,ng]=await Promise.all([
+    sb.from('pedidos').select('id',{count:'exact',head:true}).eq('negocio_id',miNeg.id).eq('estado','pendiente'),
+    sb.from('negocios').select('*').eq('id',miNeg.id).single()]);
+  const antes=npPend;npPend=r.count||0;
+  const bd=document.getElementById('npbadge');if(bd){bd.textContent=npPend;bd.style.display=npPend?'block':'none'}
   if(npPend>antes&&npAudio)npBeep();
+  if(ng.data&&(ng.data.abierto!==miNeg.abierto||ng.data.pausado_hasta!==miNeg.pausado_hasta)){
+    miNeg=ng.data;if(npTab==='pedidos')npPintarPedidos();
+  }
 }
 
 function npSet(t){
@@ -141,7 +146,7 @@ function npCard(p){
   <div style="margin:8px 0">${p.items.map(i=>`${i.cantidad} × ${esc(i.nombre)}`).join('<br>')}</div>
   ${p.nota?`<div class="meta">Nota: ${esc(p.nota)}</div>`:''}
   ${p.motivo_rechazo?`<div class="meta" style="color:var(--red)">Motivo: ${esc(p.motivo_rechazo)}</div>`:''}
-  ${retira}<div style="display:flex;gap:8px">${npAcciones(p)}</div></div>`;
+  ${retira}${window.npAcc2?npAcc2(p):''}<div style="display:flex;gap:8px">${npAcciones(p)}</div></div>`;
 }
 function npSec(t,l,vacio){
   return `<h3 style="margin:18px 0 8px">${t} (${l.length})</h3>${l.length?l.map(npCard).join(''):vacio?`<div class="empty" style="padding:16px 0">${vacio}</div>`:''}`;
@@ -163,10 +168,44 @@ function npPintarPedidos(){
   const hoy=npPeds.filter(p=>new Date(p.created_at)>=h);
   const vend=hoy.filter(p=>p.estado==='entregado').reduce((s,p)=>s+Number(p.subtotal),0);
   const k=(v,t)=>`<div style="flex:1"><div style="font-size:20px;font-weight:800;color:var(--g)">${v}</div><div class="meta">${t}</div></div>`;
-  m.innerHTML=`<div class="card" style="padding:14px"><div class="row" style="align-items:center"><div><h3>${esc(miNeg.nombre)}</h3><div class="meta">${miNeg.abierto?'Recibiendo pedidos':'Cerrado: no recibís pedidos'}</div></div>
-  <button class="btn" style="width:auto;padding:10px 16px;${miNeg.abierto?'background:none;color:var(--red);border:1px solid var(--red)':''}" onclick="toggleAbierto()">${miNeg.abierto?'Cerrar local':'Abrir local'}</button></div>
+  m.innerHTML=`<div class="card" style="padding:14px">${npCabecera()}
   <div style="display:flex;gap:8px;text-align:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">${k(hoy.length,'Pedidos hoy')}${k(money(vend),'Vendido hoy')}${k(g('pendiente').length,'Por atender')}</div></div>
   ${npSec('Nuevos',g('pendiente'),'Sin pedidos nuevos')}${npSec('En curso',g('aceptado','preparando','listo','en_camino'))}${npSec('Finalizados',g('entregado','rechazado','cancelado').slice(0,10))}`;
+}
+function npCabecera(){
+  const pausa=miNeg.pausado_hasta&&new Date(miNeg.pausado_hasta)>new Date();
+  const auto=miNeg.horario&&miNeg.horario.auto;
+  const hora=pausa?new Date(miNeg.pausado_hasta).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'}):'';
+  const estado=pausa?'Pedidos pausados hasta las '+hora
+    :miNeg.abierto?(auto?'Abierto · horario automático':'Recibiendo pedidos')
+    :(auto?'Cerrado · fuera de horario':'Cerrado: no recibís pedidos');
+  let bt='';
+  if(pausa)bt='<button class="btn" style="width:auto;padding:10px 16px" onclick="npReanudar()">Reanudar</button>';
+  else{
+    if(!auto)bt+=`<button class="btn" style="width:auto;padding:10px 16px;${miNeg.abierto?'background:none;color:var(--red);border:1px solid var(--red)':''}" onclick="toggleAbierto()">${miNeg.abierto?'Cerrar local':'Abrir local'}</button>`;
+    if(miNeg.abierto)bt+='<button class="btn sec" style="width:auto;padding:10px 16px" onclick="npPausar()">Pausar</button>';
+  }
+  return `<div class="row" style="align-items:center"><div><h3>${esc(miNeg.nombre)}</h3><div class="meta">${estado}</div></div><div style="display:flex;gap:8px">${bt}</div></div>`;
+}
+function npPausar(){
+  npAbrirSheet(`<h3 style="margin-bottom:4px">¿Cuánto tiempo pausás los pedidos?</h3><div class="meta" style="margin-bottom:14px">Los clientes ven el local cerrado y no pueden pedir. Se reabre solo cuando termina.</div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">${[[15,'15 min'],[30,'30 min'],[60,'1 hora'],[120,'2 horas']].map(x=>`<button class="btn sec" onclick="npConfirmarPausa(${x[0]})">${x[1]}</button>`).join('')}</div>`);
+}
+async function npConfirmarPausa(m){
+  const {error}=await sb.rpc('negocio_pausar',{p_min:m});
+  const s=document.getElementById('sheet');if(s)s.remove();
+  if(error)return toast(error.message,1);
+  await npRefrescarNegocio();toast('Pedidos pausados');
+}
+async function npReanudar(){
+  const {error}=await sb.rpc('negocio_reanudar');
+  if(error)return toast(error.message,1);
+  await npRefrescarNegocio();toast('Pedidos reanudados');
+}
+async function npRefrescarNegocio(){
+  const {data}=await sb.from('negocios').select('*').eq('id',miNeg.id).single();
+  if(data)miNeg=data;
+  renderNegPedidos();
 }
 function npAbrirSheet(html){
   const s=document.createElement('div');s.className='sheet';s.id='sheet';
@@ -199,4 +238,4 @@ async function npConfirmarRechazo(id,t){
   const s=document.getElementById('sheet');if(s)s.remove();
   if(error)return toast(error.message,1);
   toast('Pedido rechazado');renderNegPedidos();
-     }
+      }
