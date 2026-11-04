@@ -1,6 +1,10 @@
 /* ===== PANTALLA DEL CADETE ===== */
-document.head.insertAdjacentHTML('beforeend','<style>.chip.am{background:#ffc83d22;color:#ffc83d}</style>');
-let ciudadNom='',gpsId=null,gpsLast=0,gpsAviso=false;
+['historial.js'].forEach(f=>{const s=document.createElement('script');s.src=f;document.head.appendChild(s)});
+document.head.insertAdjacentHTML('beforeend','<style>.chip.am{background:#ffc83d22;color:#ffc83d}'
+  +'.cnav{position:fixed;left:0;right:0;bottom:0;z-index:7;background:#000f;backdrop-filter:blur(8px);border-top:1px solid var(--line);display:flex;padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}'
+  +'.cnav button{flex:1;background:none;border:0;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:3px;font-size:11px;font-weight:600;padding:6px 0}'
+  +'.cnav button.on{color:var(--g)}.cnav svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}</style>');
+let ciudadNom='',gpsId=null,gpsLast=0,gpsAviso=false,cdTab='pedidos',cdAudio=null,cdWake=null,cdPos=null,cdPosT=0,cdAlarmaT=null,cdDisp=0;
 function docsInfo(c){
   if(!c.seguro_vence||!c.carnet_vence)return{est:'rojo',txt:'Falta cargar la documentación'};
   const h=new Date();h.setHours(0,0,0,0);
@@ -12,24 +16,37 @@ function docsInfo(c){
   return{est:'verde',txt:'Documentación en regla'};
 }
 async function cadeteShell(){
+  cdTab='pedidos';
   app.innerHTML=`<header><div class="wrap"><div class="logo">PEDI <b>GO</b></div><button class="link" onclick="salir()">Salir</button></div></header>
   <div class="wrap" id="cmain" style="padding-top:14px"></div>`;
   const m=document.getElementById('cmain');
   if(!me.ciudad_id)return m.innerHTML='<div class="empty">Todavía no tenés una ciudad asignada. Pedile al administrador que te la asigne.</div>';
   const c=await sb.from('ciudades').select('nombre').eq('id',me.ciudad_id).maybeSingle();
   ciudadNom=(c.data&&c.data.nombre)||'';
-  m.innerHTML=`<div class="card" style="padding:14px"><div class="row" style="align-items:center"><div><h3>Hola, ${esc(me.nombre||'cadete')}</h3><div class="meta" id="dmsg"></div></div>
+  m.innerHTML=`<div id="cpan"><div class="card" style="padding:14px"><div class="row" style="align-items:center"><div><h3>Hola, ${esc(me.nombre||'cadete')}</h3><div class="meta" id="dmsg"></div></div>
   <button class="btn" id="dbtn" style="width:auto;padding:10px 16px" onclick="toggleDisp()"></button></div>
-  <div id="ddoc" style="margin-top:8px"></div>
+  <div id="ddoc" style="margin-top:8px"></div><div id="csnd"></div>
   <input id="alias" placeholder="Tu alias de Mercado Pago" value="${esc(me.mp_alias||'')}" style="margin:12px 0 8px">
-  <button class="btn sec" onclick="guardarAlias()">Guardar alias</button></div><div id="clist"></div>`;
-  dispUI();
+  <button class="btn sec" onclick="guardarAlias()">Guardar alias</button></div><div id="clist"></div></div><div id="chis" style="display:none"></div>`;
+  app.insertAdjacentHTML('beforeend','<nav class="cnav"><button id="cn1" class="on" onclick="cdSet(\'pedidos\')"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Pedidos</span></button>'
+    +'<button id="cn2" onclick="cdSet(\'ganancias\')"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg><span>Ganancias</span></button></nav>');
+  dispUI();cdSonidoUI();
   if(ch)sb.removeChannel(ch);
   ch=sb.channel('cad-pedidos').on('postgres_changes',{event:'*',schema:'public',table:'pedidos'},p=>{
     if(me.disponible&&p.new&&!p.new.cadete_id&&navigator.vibrate)navigator.vibrate([150,80,150]);
     renderCadete();
   }).subscribe();
   renderCadete();
+}
+function cdSet(t){
+  cdTab=t;
+  document.getElementById('cpan').style.display=t==='pedidos'?'':'none';
+  document.getElementById('chis').style.display=t==='ganancias'?'':'none';
+  document.getElementById('cn1').className=t==='pedidos'?'on':'';
+  document.getElementById('cn2').className=t==='ganancias'?'on':'';
+  window.scrollTo(0,0);
+  if(t==='pedidos')renderCadete();
+  else if(window.renderHistorial)renderHistorial();
 }
 function dispUI(){
   const b=document.getElementById('dbtn');if(!b)return;
@@ -38,6 +55,7 @@ function dispUI(){
   b.style.cssText='width:auto;padding:10px 16px;'+(on?'':'background:none;color:var(--mut);border:1px solid var(--line)');
   document.getElementById('dmsg').textContent=rojo?'Deshabilitado por documentación':on?'Te mostramos los pedidos para tomar':'Activate para ver pedidos disponibles';
   document.getElementById('ddoc').innerHTML=`<span class="chip ${d.est==='verde'?'ok':d.est==='amarillo'?'am':'no'}">${d.est==='verde'?'En regla':d.est==='amarillo'?'Por vencer':'Deshabilitado'}</span> <span class="meta">${esc(d.txt)}</span>`;
+  cdPantalla(on);
 }
 async function toggleDisp(){
   const d=docsInfo(me);
@@ -51,6 +69,72 @@ async function guardarAlias(){
   const {error}=await sb.from('perfiles').update({mp_alias:v||null}).eq('id',me.id);
   error?toast(error.message,1):toast('Alias guardado');
 }
+
+/* --- Alerta con sonido, pantalla encendida y distancia --- */
+function cdBeep(){
+  if(!cdAudio)return;
+  const t=cdAudio.currentTime;
+  [[880,0],[1175,0.2]].forEach(([f,d])=>{
+    const o=cdAudio.createOscillator(),g=cdAudio.createGain();
+    o.type='sine';o.frequency.value=f;
+    g.gain.setValueAtTime(0.0001,t+d);
+    g.gain.exponentialRampToValueAtTime(0.6,t+d+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+d+0.32);
+    o.connect(g);g.connect(cdAudio.destination);o.start(t+d);o.stop(t+d+0.35);
+  });
+  if(navigator.vibrate)navigator.vibrate([200,100,200]);
+}
+function cdActivar(){
+  try{cdAudio=new (window.AudioContext||window.webkitAudioContext)();cdAudio.resume();cdBeep()}
+  catch(_){toast('Este celular no permite alertas con sonido',1)}
+  cdSonidoUI();
+}
+function cdSonidoUI(){
+  const e=document.getElementById('csnd');if(!e)return;
+  e.innerHTML=cdAudio?'<div class="meta" style="margin-top:8px;color:var(--g)">Alerta con sonido activada</div>'
+    :'<button class="btn" style="margin-top:10px;background:var(--red);color:#fff" onclick="cdActivar()">Tocá para activar el sonido de pedidos nuevos</button>';
+}
+function cdAlarma(on){
+  if(on&&!cdAlarmaT)cdAlarmaT=setInterval(()=>{
+    if(!document.getElementById('clist')){cdAlarma(false);return}
+    cdBeep();
+  },5000);
+  if(!on&&cdAlarmaT){clearInterval(cdAlarmaT);cdAlarmaT=null}
+}
+async function cdPantalla(on){
+  try{
+    if(on&&'wakeLock' in navigator&&document.visibilityState==='visible'&&!cdWake){
+      cdWake=await navigator.wakeLock.request('screen');
+      cdWake.addEventListener('release',()=>{cdWake=null});
+    }
+    if(!on&&cdWake){cdWake.release();cdWake=null}
+  }catch(_){}
+}
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible'&&document.getElementById('clist')&&me&&me.disponible)cdPantalla(true);
+});
+function cdUbicar(){
+  if(!navigator.geolocation||Date.now()-cdPosT<60000)return;
+  cdPosT=Date.now();
+  navigator.geolocation.getCurrentPosition(p=>{cdPos={lat:p.coords.latitude,lng:p.coords.longitude};renderCadete()},()=>{},{timeout:10000,maximumAge:60000});
+}
+function cdKm(a,b,c,d){
+  const R=6371,t=x=>x*Math.PI/180,dl=t(c-a),dg=t(d-b);
+  const h=Math.sin(dl/2)**2+Math.cos(t(a))*Math.cos(t(c))*Math.sin(dg/2)**2;
+  return 2*R*Math.asin(Math.sqrt(h));
+}
+const cdDist=n=>cdPos&&n&&n.lat!=null&&n.lng!=null?cdKm(cdPos.lat,cdPos.lng,n.lat,n.lng):null;
+const cdFmtKm=k=>k<1?Math.round(k*1000)+' m':k.toFixed(1).replace('.',',')+' km';
+function cdTel(t){
+  let d=String(t||'').replace(/\D/g,'').replace(/^0+/,'');
+  if(!d)return '';
+  if(d.startsWith('549'))return d;
+  if(d.startsWith('54'))d=d.slice(2);
+  if(d.length===12){for(const p of [2,3,4]){if(d.slice(p,p+2)==='15'){d=d.slice(0,p)+d.slice(p+2);break}}}
+  return '549'+d;
+}
+
+/* --- Ubicación mientras reparte --- */
 function gpsSync(on){
   if(on&&gpsId===null&&navigator.geolocation){
     gpsId=navigator.geolocation.watchPosition(pos=>{
@@ -63,10 +147,13 @@ function gpsSync(on){
     sb.rpc('cadete_ubicacion',{p_lat:0,p_lng:0,p_repartiendo:false});
   }
 }
+
+/* --- Pedidos --- */
 const mapa=d=>'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(d+(ciudadNom?', '+ciudadNom:''));
 function cadDisp(p){
+  const km=p._km;
   return `<div class="card" style="padding:14px"><div class="row"><b>${esc(p.negocios?.nombre||'Comercio')}</b><span class="chip ok">Ganás ${money(p.costo_envio)}</span></div>
-  <div class="meta">Retirar en: ${esc(p.negocios?.direccion||'-')}</div>
+  <div class="meta">Retirar en: ${esc(p.negocios?.direccion||'-')}${km!=null?' · a unos '+cdFmtKm(km):''}</div>
   <div class="meta">Entregar en: ${esc(p.direccion_entrega)}</div>
   <div class="row"><span class="meta">${ESTADOS[p.estado]}</span><span class="meta">Pedido ${p.numero}</span></div>
   <button class="btn" style="margin-top:10px" onclick="tomar('${p.id}')">Tomar pedido</button></div>`;
@@ -75,17 +162,20 @@ function cadMio(p){
   let acc='<div class="meta" style="margin-top:8px">Esperando que el comercio lo termine</div>';
   if(p.estado==='listo')acc=`<button class="btn" style="margin-top:10px" onclick="setCad('${p.id}','en_camino')">Lo retiré, salgo a entregar</button>`;
   if(p.estado==='en_camino')acc=`<div class="meta" style="margin-top:8px">Mientras repartís, la Muni ve tu ubicación. Dejá la app abierta.</div><button class="btn" style="margin-top:10px" onclick="setCad('${p.id}','entregado')">Marcar como entregado</button>`;
+  const tel=cdTel(p.cliente_telefono);
+  const msg='Hola '+String(p.cliente_nombre||'').split(' ')[0]+', soy tu cadete de PEDI GO con tu pedido #'+p.numero+(p.negocios?.nombre?' de '+p.negocios.nombre:'')+'.';
+  const contacto=tel?`<div style="display:flex;gap:8px;margin-top:10px"><a class="btn sec" style="flex:1;padding:10px;text-align:center;text-decoration:none" href="tel:${esc(p.cliente_telefono)}">Llamar</a><a class="btn sec" style="flex:1;padding:10px;text-align:center;text-decoration:none" href="https://wa.me/${tel}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">WhatsApp</a></div>`:'';
   return `<div class="card" style="padding:14px;border-color:var(--g)"><div class="row"><b>${esc(p.negocios?.nombre||'Comercio')}</b><span class="chip ok">${ESTADOS[p.estado]}</span></div>
   <div class="meta">Retirar en: <a style="color:var(--g)" href="${mapa(p.negocios?.direccion||'')}" target="_blank" rel="noopener">${esc(p.negocios?.direccion||'-')}</a></div>
   <div class="meta">Entregar en: <a style="color:var(--g)" href="${mapa(p.direccion_entrega)}" target="_blank" rel="noopener">${esc(p.direccion_entrega)}</a></div>
-  <div class="meta">${esc(p.cliente_nombre)}${p.cliente_telefono?` · <a style="color:var(--g)" href="tel:${esc(p.cliente_telefono)}">${esc(p.cliente_telefono)}</a>`:''}</div>
+  <div class="meta">${esc(p.cliente_nombre)}</div>
   ${p.nota?`<div class="meta">Nota: ${esc(p.nota)}</div>`:''}
-  <div class="row"><span class="meta">Pedido ${p.numero} · cobrar al cliente (efectivo)</span><b>${money(p.total)}</b></div>${acc}</div>`;
+  <div class="row"><span class="meta">Pedido ${p.numero} · cobrar al cliente (efectivo)</span><b>${money(p.total)}</b></div>${contacto}${acc}</div>`;
 }
 async function renderCadete(){
   const m=document.getElementById('clist');if(!m)return;
   const [r,pf]=await Promise.all([
-    sb.from('pedidos').select('*, negocios(nombre,direccion)').order('created_at',{ascending:false}).limit(60),
+    sb.from('pedidos').select('*, negocios(nombre,direccion,lat,lng)').order('created_at',{ascending:false}).limit(60),
     sb.from('perfiles').select('*').eq('id',me.id).single()]);
   if(pf.data){me=pf.data;dispUI()}
   const {data,error}=r;
@@ -97,7 +187,13 @@ async function renderCadete(){
   const ent=mios.filter(p=>p.estado==='entregado'&&new Date(p.updated_at)>=hoy);
   const gan=ent.reduce((s,p)=>s+Number(p.ganancia_cadete),0);
   const on=me.disponible&&docsInfo(me).est!=='rojo';
+  if(on)cdUbicar();
   const disp=on?data.filter(p=>!p.cadete_id&&['aceptado','preparando','listo'].includes(p.estado)):[];
+  disp.forEach(p=>{p._km=cdDist(p.negocios)});
+  disp.sort((a,b)=>(a._km??1e9)-(b._km??1e9));
+  if(disp.length>cdDisp&&cdAudio)cdBeep();
+  cdDisp=disp.length;
+  cdAlarma(disp.length>0&&!activos.length&&!!cdAudio);
   m.innerHTML=`<div class="card" style="padding:14px"><div class="meta">Ganancias de hoy</div><div style="font-size:28px;font-weight:800;color:var(--g)">${money(gan)}</div><div class="meta">${ent.length} ${ent.length===1?'entrega':'entregas'}</div></div>
   <h3 style="margin:18px 0 8px">Mi pedido (${activos.length})</h3>${activos.map(cadMio).join('')||'<div class="empty" style="padding:16px 0">No tenés pedidos en curso</div>'}
   <h3 style="margin:18px 0 8px">Disponibles (${disp.length})</h3>${disp.map(cadDisp).join('')||`<div class="empty" style="padding:16px 0">${on?'No hay pedidos para tomar ahora':'Activate como disponible para ver pedidos'}</div>`}`;
