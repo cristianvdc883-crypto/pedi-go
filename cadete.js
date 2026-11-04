@@ -27,7 +27,7 @@ async function cadeteShell(){
   <button class="btn" id="dbtn" style="width:auto;padding:10px 16px" onclick="toggleDisp()"></button></div>
   <div id="ddoc" style="margin-top:8px"></div><div id="csnd"></div>
   <input id="alias" placeholder="Tu alias de Mercado Pago" value="${esc(me.mp_alias||'')}" style="margin:12px 0 8px">
-  <button class="btn sec" onclick="guardarAlias()">Guardar alias</button></div><div id="clist"></div></div><div id="chis" style="display:none"></div>`;
+  <button class="btn sec" onclick="guardarAlias()">Guardar alias</button></div><div id="cmapawrap"></div><div id="clist"></div></div><div id="chis" style="display:none"></div>`;
   app.insertAdjacentHTML('beforeend','<nav class="cnav"><button id="cn1" class="on" onclick="cdSet(\'pedidos\')"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Pedidos</span></button>'
     +'<button id="cn2" onclick="cdSet(\'ganancias\')"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg><span>Ganancias</span></button></nav>');
   dispUI();cdSonidoUI();
@@ -138,6 +138,7 @@ function cdTel(t){
 function gpsSync(on){
   if(on&&gpsId===null&&navigator.geolocation){
     gpsId=navigator.geolocation.watchPosition(pos=>{
+      cdPos={lat:pos.coords.latitude,lng:pos.coords.longitude};if(window.mapaMover)mapaMover();
       const t=Date.now();if(t-gpsLast<8000)return;gpsLast=t;
       sb.rpc('cadete_ubicacion',{p_lat:pos.coords.latitude,p_lng:pos.coords.longitude,p_repartiendo:true});
     },()=>{if(!gpsAviso){gpsAviso=true;toast('Activá la ubicación del celular para que la Muni te vea',1)}},{enableHighAccuracy:true,maximumAge:5000});
@@ -162,12 +163,13 @@ function cadMio(p){
   let acc='<div class="meta" style="margin-top:8px">Esperando que el comercio lo termine</div>';
   if(p.estado==='listo')acc=`<button class="btn" style="margin-top:10px" onclick="setCad('${p.id}','en_camino')">Lo retiré, salgo a entregar</button>`;
   if(p.estado==='en_camino')acc=`<div class="meta" style="margin-top:8px">Mientras repartís, la Muni ve tu ubicación. Dejá la app abierta.</div><button class="btn" style="margin-top:10px" onclick="setCad('${p.id}','entregado')">Marcar como entregado</button>`;
+  const dirE=p.lat!=null?'https://www.google.com/maps/search/?api=1&query='+p.lat+','+p.lng:mapa(p.direccion_entrega);
   const tel=cdTel(p.cliente_telefono);
   const msg='Hola '+String(p.cliente_nombre||'').split(' ')[0]+', soy tu cadete de PEDI GO con tu pedido #'+p.numero+(p.negocios?.nombre?' de '+p.negocios.nombre:'')+'.';
   const contacto=tel?`<div style="display:flex;gap:8px;margin-top:10px"><a class="btn sec" style="flex:1;padding:10px;text-align:center;text-decoration:none" href="tel:${esc(p.cliente_telefono)}">Llamar</a><a class="btn sec" style="flex:1;padding:10px;text-align:center;text-decoration:none" href="https://wa.me/${tel}?text=${encodeURIComponent(msg)}" target="_blank" rel="noopener">WhatsApp</a></div>`:'';
   return `<div class="card" style="padding:14px;border-color:var(--g)"><div class="row"><b>${esc(p.negocios?.nombre||'Comercio')}</b><span class="chip ok">${ESTADOS[p.estado]}</span></div>
   <div class="meta">Retirar en: <a style="color:var(--g)" href="${mapa(p.negocios?.direccion||'')}" target="_blank" rel="noopener">${esc(p.negocios?.direccion||'-')}</a></div>
-  <div class="meta">Entregar en: <a style="color:var(--g)" href="${mapa(p.direccion_entrega)}" target="_blank" rel="noopener">${esc(p.direccion_entrega)}</a></div>
+  <div class="meta">Entregar en: <a style="color:var(--g)" href="${dirE}" target="_blank" rel="noopener">${esc(p.direccion_entrega)}</a></div>
   <div class="meta">${esc(p.cliente_nombre)}</div>
   ${p.nota?`<div class="meta">Nota: ${esc(p.nota)}</div>`:''}
   <div class="row"><span class="meta">Pedido ${p.numero} · cobrar al cliente (efectivo)</span><b>${money(p.total)}</b></div>${contacto}${acc}</div>`;
@@ -183,6 +185,7 @@ async function renderCadete(){
   const mios=data.filter(p=>p.cadete_id===me.id);
   const activos=mios.filter(p=>['aceptado','preparando','listo','en_camino'].includes(p.estado));
   gpsSync(activos.some(p=>p.estado==='en_camino'));
+  if(window.mapaCadete)mapaCadete(activos[0]||null);
   const hoy=new Date();hoy.setHours(0,0,0,0);
   const ent=mios.filter(p=>p.estado==='entregado'&&new Date(p.updated_at)>=hoy);
   const gan=ent.reduce((s,p)=>s+Number(p.ganancia_cadete),0);
