@@ -55,6 +55,7 @@ input:focus,textarea:focus,button:focus-visible{outline:2px solid var(--g);outli
 <script src="admin.js"></script>
 <script src="ranking.js"></script>
 <script src="productos.js"></script>
+<script src="mapa.js"></script>
 <script>
 // ====== CONFIGURACIÓN: reemplazá estas dos líneas con los datos de tu proyecto Supabase ======
 const SUPABASE_URL='https://wnivydpyoqqvkxufuudq.supabase.co', SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduaXZ5ZHB5b3Fxdmt4dWZ1dWRxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwNDYxMTQsImV4cCI6MjEwODYyMjExNH0.78HBLsvlJ9SXNxWuPsBSZtld3eQU5LGiL27ef1jzfeA';
@@ -64,7 +65,7 @@ const app=document.getElementById('app');
 const money=n=>'$'+Number(n||0).toLocaleString('es-AR');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ESTADOS={pendiente:'Esperando al negocio',aceptado:'Aceptado',preparando:'En preparación',listo:'Listo, buscando cadete',en_camino:'En camino',entregado:'Entregado',rechazado:'Rechazado',cancelado:'Cancelado'};
-let me=null,tab='negocios',cart={},neg=null,prods=[],ch=null;
+let me=null,tab='negocios',cart={},neg=null,prods=[],ch=null,ckPos=null;
 
 function toast(m,err){const t=document.createElement('div');t.className='toast'+(err?' err':'');t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),3200)}
 
@@ -163,12 +164,14 @@ function renderBar(){
 function checkout(){
   if(!neg.abierto)return toast('El comercio está cerrado por ahora',1);
   const items=prods.filter(p=>cart[p.id]);
+  ckPos=null;
   const s=document.createElement('div');s.className='sheet';s.id='sheet';
   s.innerHTML=`<div><h3 style="margin-bottom:10px">Tu pedido en ${esc(neg.nombre)}</h3>
   ${items.map(p=>`<div class="row"><span>${cart[p.id]} × ${esc(p.nombre)}</span><span>${money(p.precio*cart[p.id])}</span></div>`).join('')}
   <div class="row meta"><span>Envío</span><span>${money(neg.costo_envio)}</span></div>
   <div class="row tot"><span>Total</span><span>${money(subtotal()+Number(neg.costo_envio))}</span></div>
   <div style="margin-top:14px"><input id="dir" placeholder="Dirección de entrega (calle y número)" value="${esc(localStorage.getItem('pg_dir')||'')}" autocomplete="street-address">
+  <button class="btn sec" id="ckmap" style="margin-bottom:6px" onclick="ckUbicar()">Marcar mi ubicación en el mapa</button><div class="meta" id="ckmapinfo" style="margin:0 0 12px">Recomendado: ayuda al cadete a llegar a tu puerta.</div>
   <textarea id="nota" rows="2" placeholder="Aclaraciones para el comercio (opcional)"></textarea>
   <div class="meta" style="margin-bottom:12px">Pagás en efectivo al recibir.</div>
   <button class="btn" id="conf">Confirmar pedido</button><button class="btn sec" style="margin-top:8px" onclick="document.getElementById('sheet').remove()">Seguir mirando</button></div></div>`;
@@ -177,11 +180,22 @@ function checkout(){
     const dir=document.getElementById('dir').value.trim();
     if(!dir)return toast('Falta la dirección de entrega',1);
     e.target.disabled=true;
-    const {error}=await sb.rpc('crear_pedido',{p_negocio:neg.id,p_items:items.map(p=>({producto_id:p.id,cantidad:cart[p.id]})),p_direccion:dir,p_pago:'efectivo',p_nota:document.getElementById('nota').value});
+    const {error}=await sb.rpc('crear_pedido',{p_negocio:neg.id,p_items:items.map(p=>({producto_id:p.id,cantidad:cart[p.id]})),p_direccion:dir,p_lat:ckPos?ckPos.lat:null,p_lng:ckPos?ckPos.lng:null,p_pago:'efectivo',p_nota:document.getElementById('nota').value});
     if(error){e.target.disabled=false;return toast(error.message,1)}
-    try{localStorage.setItem('pg_dir',dir)}catch(_){}
+    try{localStorage.setItem('pg_dir',dir);if(ckPos)localStorage.setItem('pg_pos',JSON.stringify(ckPos))}catch(_){}
     s.remove();cart={};toast('Pedido enviado al comercio');setTab('pedidos');
   };
+}
+function ckUbicar(){
+  if(!window.mapaElegir)return toast('El mapa no está disponible',1);
+  let ini=ckPos;
+  if(!ini){try{const g=JSON.parse(localStorage.getItem('pg_pos')||'null');if(g)ini={lat:g.lat,lng:g.lng,zoom:17}}catch(_){}}
+  if(!ini&&neg&&neg.lat!=null)ini={lat:neg.lat,lng:neg.lng,zoom:15};
+  mapaElegir(p=>{
+    ckPos=p;
+    const b=document.getElementById('ckmap');if(b)b.textContent='Ubicación marcada. Tocá para cambiarla';
+    const i=document.getElementById('ckmapinfo');if(i){i.textContent='Listo: el cadete va a ver tu punto exacto en el mapa.';i.style.color='var(--g)'}
+  },ini,'Marcá dónde entregamos');
 }
 
 async function renderPedidos(){
