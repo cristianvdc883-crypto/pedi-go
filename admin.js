@@ -35,10 +35,23 @@ function aComercios(){
   document.getElementById('amain').innerHTML=aNegs.map(n=>{
     const o=aUsers.find(u=>u.id===n.owner_id);
     return `<div class="card" style="padding:14px"><div class="row"><b>${esc(n.nombre)}</b><span class="chip ${n.activo?'ok':'no'}">${n.activo?'Habilitado':'Suspendido'}</span></div>
-    <div class="meta">${esc(n.rubro)} · ${esc(n.direccion||'')}</div><div class="meta">Dueño: ${o?esc(o.email):'sin asignar'}</div>
+    <div class="meta">${esc(n.rubro)} · ${esc(n.direccion||'')}</div><div class="meta">Ubicación: ${Number(n.lat).toFixed(5)}, ${Number(n.lng).toFixed(5)}</div><div class="meta">Dueño: ${o?esc(o.email):'sin asignar'}</div>
     <select id="o${n.id}" class="sel" style="margin-top:10px"><option value="">Elegí un usuario…</option>${duenos.map(u=>`<option value="${u.id}">${esc(u.email)}</option>`).join('')}</select>
     <button class="btn sec" style="margin-top:8px" onclick="aAsignar('${n.id}')">Asignar dueño</button>
+    <button class="btn sec" style="margin-top:8px" onclick="aUbicar('${n.id}')">Ubicación en el mapa</button>
     <button class="btn red" onclick="aActivo('${n.id}',${!n.activo})">${n.activo?'Suspender comercio':'Habilitar comercio'}</button></div>`}).join('');
+}
+function aUbicar(id){
+  const n=aNegs.find(x=>x.id===id);
+  if(!window.mapaElegir)return toast('El mapa no está disponible',1);
+  mapaElegir(async p=>{
+    const dir=prompt('Dirección del local, como la ve el cadete:',n.direccion||'');
+    const datos={id,lat:p.lat,lng:p.lng};
+    if(dir&&dir.trim())datos.direccion=dir.trim();
+    const {error}=await sb.rpc('dueno_guardar_negocio',{p:datos});
+    if(error)return toast(error.message,1);
+    toast('Ubicación del local guardada');aSet('comercios');
+  },{lat:n.lat,lng:n.lng,zoom:17},'Marcá el local: '+n.nombre);
 }
 async function aAsignar(id){
   const v=document.getElementById('o'+id).value;
