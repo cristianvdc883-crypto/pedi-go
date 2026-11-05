@@ -1,4 +1,5 @@
 /* ===== RANKING DE CADETES ===== */
+['pagos.js'].forEach(f=>{const s=document.createElement('script');s.src=f;document.head.appendChild(s)});
 document.head.insertAdjacentHTML('beforeend','<style>.stars button{background:none;border:0;font-size:32px;color:#ffc83d;padding:4px 8px}.est{color:#ffc83d;letter-spacing:2px}</style>');
 const estrellas=n=>'★'.repeat(n)+'☆'.repeat(5-n);
 const rkFecha=d=>new Date(d).toLocaleDateString('es-AR',{day:'2-digit',month:'2-digit'});
@@ -13,14 +14,19 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(!data.length)return m.innerHTML='<div class="empty">Todavía no hiciste pedidos. Elegí un comercio y armá el primero.</div>';
     m.innerHTML=data.map(p=>{
       const fin=['entregado','rechazado','cancelado'].includes(p.estado);
-      let cal='';
+      let cal='',info='';
+      if(['aceptado','preparando'].includes(p.estado)&&p.tiempo_prep_min&&p.aceptado_at){
+        const listo=new Date(new Date(p.aceptado_at).getTime()+p.tiempo_prep_min*60000);
+        info=`<div class="meta" style="color:var(--g)">Listo aproximadamente a las ${listo.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} (${p.tiempo_prep_min} min)</div>`;
+      }
+      if(p.estado==='rechazado'&&p.motivo_rechazo)info=`<div class="meta" style="color:var(--red)">Motivo: ${esc(p.motivo_rechazo)}</div>`;
       if(p.estado==='entregado'&&p.cadete_id){
         cal=p.calif_cadete
           ?`<div class="meta">Tu calificación al cadete: <span class="est">${estrellas(p.calif_cadete)}</span></div>`
           :`<div class="meta" style="margin-top:8px">¿Cómo fue la entrega? Calificá al cadete</div><div class="stars">${[1,2,3,4,5].map(n=>`<button aria-label="${n} estrellas" onclick="calificar('${p.id}',${n})">★</button>`).join('')}</div>`;
       }
       return `<div class="card" style="padding:14px"><div class="row"><b>${esc(p.negocios?.nombre||'Comercio')}</b><span class="chip ${p.estado==='entregado'?'ok':fin?'no':''}">${ESTADOS[p.estado]}</span></div>
-      <div class="meta">Pedido ${p.numero} · ${new Date(p.created_at).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>
+      <div class="meta">Pedido ${p.numero} · ${new Date(p.created_at).toLocaleString('es-AR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</div>${info}
       <div style="margin:8px 0">${p.items.map(i=>`${i.cantidad} × ${esc(i.nombre)}`).join('<br>')}</div>
       <div class="row"><span class="meta">Total con envío</span><b>${money(p.total)}</b></div>${cal}
       ${p.estado==='pendiente'?`<button class="btn red" onclick="cancelar('${p.id}')">Cancelar pedido</button>`:''}</div>`}).join('');
@@ -49,21 +55,22 @@ document.addEventListener('DOMContentLoaded',()=>{
     ${cuerpo}<div class="meta" style="margin-top:8px">Premio al puesto 1: <b style="color:#ffc83d">${money(data.premio)}</b></div></div>`);
   };
 
-  /* --- Dueño: pestaña Ranking --- */
+  /* --- Dueño: pestañas Ranking y Pagos --- */
   const _ds=duenoShell;
   duenoShell=async function(){
     await _ds();
     const t=document.querySelector('.tabs');if(!t)return;
-    t.insertAdjacentHTML('beforeend','<button id="a4" onclick="aSet(\'ranking\')">Ranking</button>');
-    t.querySelectorAll('button').forEach(b=>{b.style.fontSize='13px';b.style.padding='10px 2px'});
+    t.insertAdjacentHTML('beforeend','<button id="a4" onclick="aSet(\'ranking\')">Ranking</button><button id="a5" onclick="aSet(\'pagos\')">Pagos</button>');
+    t.style.overflowX='auto';
+    t.querySelectorAll('button').forEach(b=>Object.assign(b.style,{flex:'none',fontSize:'13px',padding:'10px 14px',whiteSpace:'nowrap'}));
   };
   const _as=aSet;
   aSet=async function(t){
-    const b=document.getElementById('a4');
-    if(t!=='ranking'){if(b)b.className='';return _as(t)}
-    ['a1','a2','a3'].forEach(i=>{const e=document.getElementById(i);if(e)e.className=''});
-    if(b)b.className='on';
-    rkAdmin();
+    const prop=t==='ranking'||t==='pagos';
+    ['a1','a2','a3','a4','a5'].forEach(i=>{const e=document.getElementById(i);if(e)e.className=''});
+    if(!prop)return _as(t);
+    const on=document.getElementById(t==='ranking'?'a4':'a5');if(on)on.className='on';
+    if(t==='ranking')rkAdmin();else if(window.pgAdmin)pgAdmin();
   };
 });
 
@@ -129,4 +136,4 @@ async function rkTerminar(id){
   const {error}=await sb.rpc('dueno_terminar_ranking',{p_id:id});
   if(error)return toast(error.message,1);
   rkAdmin();
-                                                                               }
+}
